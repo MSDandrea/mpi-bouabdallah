@@ -1,0 +1,3 @@
+/home/matheus/CLionProjects/Naimi-Trehel/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/home/matheus/CLionProjects/Naimi-Trehel/cmake-build-debug/CMakeFiles/Naimi_Trehel.dir
+/home/matheus/CLionProjects/Naimi-Trehel/cmake-build-debug/CMakeFiles/edit_cache.dir
