@@ -7,8 +7,9 @@
 const int elected_node = 0;
 const unsigned char REQUEST_MESSAGE = 'R';
 const unsigned char TOKEN_MESSAGE = 'T';
+const unsigned char FINALIZE_MESSAGE = 'F';
 
-int self, owner, next, token, requesting;
+int self, owner, next, token, requesting, finalized, all_finalized, total_nodes;
 MPI_Datatype mpi_req;
 
 void release_cs();
@@ -16,6 +17,8 @@ void release_cs();
 void send_token(int to);
 
 void send_request(int origin, int to);
+
+void send_finalize();
 
 void receive_request_cs(int sj);
 
@@ -31,6 +34,7 @@ typedef struct {
 } request;
 
 int main(int argc, char **argv) {
+    srand(rand());
     pthread_t rec_thread;
     MPI_Init(&argc, &argv);
 
@@ -47,8 +51,11 @@ int main(int argc, char **argv) {
     MPI_Type_commit(&mpi_req);
 
     //initialize
+    MPI_Comm_size(MPI_COMM_WORLD, &total_nodes);
     MPI_Comm_rank(MPI_COMM_WORLD, &self);
     printf("Olá sou o nó %d\n", self);
+    all_finalized = 0;
+    finalized = 0;
     requesting = 0;
     next = -1; //usando -1 como NULL para nós
     if (self == elected_node) {
@@ -62,15 +69,18 @@ int main(int argc, char **argv) {
     //levanta uma thread para ficar escutando requests
     pthread_create(&rec_thread, NULL, receive, NULL);
 
-    //while true gera um numero entre 0 e 5 se gerou "meu numero" faço o pedido, dorme por um segundo
-    while (0 == 0) {
+    //while true gera um numero entre 0 e 4 se gerou "meu numero" faço o pedido, dorme por um segundo
+    int count = 0;
+    while (count != 3) {
         int random = (rand() % (5));
         if (self == random) {
             request_cs();
+            count++;
         }
         usleep(1 * 1000000);
     }
-
+    send_finalize();
+    pthread_join(rec_thread, NULL);
     //area inalcansável por causa do while true
     MPI_Finalize();
     return 0;
@@ -83,7 +93,7 @@ void request_cs() {
         send_request(self, owner);
         owner = -1;
 
-        //wait token receival
+        //espera token
         while (!token) {}
 
         int random_sleep = (rand() % (3)) * 1000000;
@@ -99,9 +109,14 @@ void receive_token() {
     printf("Nó %d recebeu o token.\n", self);
 }
 
+void receive_finalize() {
+    all_finalized++;
+}
+
 void receive_request_cs(int sj) {
     if (owner == -1) {
         if (requesting) {
+            printf("%d é next de %d\n", sj, self);
             next = sj;
         } else {
             token = 0;
@@ -111,6 +126,7 @@ void receive_request_cs(int sj) {
         send_request(sj, owner);
     }
     owner = sj;
+    printf(" Owner de %d é %d\n", self, owner);
 }
 
 void release_cs() {
@@ -125,7 +141,7 @@ void release_cs() {
 
 //função pra thread de receive
 void *receive(void *nil) {
-    while (0 == 0) {
+    while (all_finalized != total_nodes) {
         MPI_Status st;
         request received;
         MPI_Recv(&received, 1, mpi_req, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &st);
@@ -135,9 +151,21 @@ void *receive(void *nil) {
             receive_request_cs(received.origin);
         } else if (received.type == TOKEN_MESSAGE) {
             receive_token();
-        } else {
+        } else if (received.type == FINALIZE_MESSAGE){
+            receive_finalize();
+        }
+        else {
             printf("ERROR UNKNOWN MESSAGE RECEIVED: %c", received.type);
         }
+    }
+}
+
+void send_finalize() {
+    request req;
+    req.type = FINALIZE_MESSAGE;
+    req.origin = self;
+    for (int to = 0; to < total_nodes; to++) {
+        MPI_Send(&req, 1, mpi_req, to, 0, MPI_COMM_WORLD);
     }
 }
 
