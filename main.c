@@ -9,7 +9,8 @@ const unsigned char REQUEST_MESSAGE = 'R';
 const unsigned char TOKEN_MESSAGE = 'T';
 const unsigned char FINALIZE_MESSAGE = 'F';
 
-int self, owner, next, token, requesting, finalized, all_finalized, total_nodes;
+int self, owner, next, requesting, all_finalized, total_nodes;
+pthread_mutex_t token;
 MPI_Datatype mpi_req;
 
 void release_cs();
@@ -55,14 +56,13 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &self);
     printf("Olá sou o nó %d\n", self);
     all_finalized = 0;
-    finalized = 0;
     requesting = 0;
+    pthread_mutex_init(&token,NULL);
     next = -1; //usando -1 como NULL para nós
     if (self == elected_node) {
-        token = 1;
         owner = -1;
     } else {
-        token = 0;
+        pthread_mutex_lock(&token);
         owner = elected_node;
     }
 
@@ -81,7 +81,6 @@ int main(int argc, char **argv) {
     }
     send_finalize();
     pthread_join(rec_thread, NULL);
-    //area inalcansável por causa do while true
     MPI_Finalize();
     return 0;
 }
@@ -94,18 +93,17 @@ void request_cs() {
         owner = -1;
 
         //espera token
-        while (!token) {}
-
-        int random_sleep = (rand() % (3)) * 1000000;
-        printf("Nó %d entrou na seção irá dormir por %d segundos\n", self, random_sleep / 1000000);
-        usleep((__useconds_t) random_sleep);
-        release_cs();
+        pthread_mutex_lock(&token);
 
     }
+    int random_sleep = (rand() % (3)) * 1000000;
+    printf("Nó %d entrou na seção irá dormir por %d segundos\n", self, random_sleep / 1000000);
+    usleep((__useconds_t) random_sleep);
+    release_cs();
 }
 
 void receive_token() {
-    token = 1;
+    pthread_mutex_unlock(&token);
     printf("Nó %d recebeu o token.\n", self);
 }
 
@@ -119,7 +117,6 @@ void receive_request_cs(int sj) {
             printf("%d é next de %d\n", sj, self);
             next = sj;
         } else {
-            token = 0;
             send_token(sj);
         }
     } else {
@@ -131,10 +128,11 @@ void receive_request_cs(int sj) {
 
 void release_cs() {
     printf("Nó %d liberando seção crítica\n", self);
+    pthread_mutex_unlock(&token);
     requesting = 0;
     if (next != -1) {
         send_token(next);
-        token = 0;
+        pthread_mutex_lock(&token);
         next = -1;
     }
 }
