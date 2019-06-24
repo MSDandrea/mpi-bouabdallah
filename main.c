@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <time.h>
 
 enum messages {
     REQUEST_CONTROL_TOKEN = 0,
@@ -124,10 +125,10 @@ void receive_token_request(int origin) {
         parent = origin;
         next = origin;
         if (control_token && !using_control_token) {
-            printf("tenho o token e não o estou usando, enviar\n");
+            printf("tenho o token e não o estou usando, enviar para %d\n", origin);
             send_token();
         } else
-            printf("estou usando o token o entregarei quando terminar\n");
+            printf("estou usando o token o entregarei quando terminar | next=%d parent=%d\n", next, parent);
     }
 }
 
@@ -237,6 +238,7 @@ void use_resources(int requested[3]) {
         }
         for (int i = 0; i < n_rec; ++i) {
             if (needed_resources[i] && my_resources[i]) {
+                printf("%d: token %d é necessário e já o tenho localmente\n", self, i);
                 using_resources[i] = 1;
             }
             if (needed_resources[i] && !my_resources[i]) {//pegue todos os tokens que precisa e não tem
@@ -311,6 +313,7 @@ void use_resources(int requested[3]) {
     using_control_token = 0;
     printf("%d: Entrei seção crítica\n", self);
     //seção crítica
+    usleep((rand() % (2)) * 1000000);
     printf("%d: Sai seção crítica\n", self);
     for (int m = 0; m < n_rec; ++m) {
         needed_resources[m] = 0;
@@ -330,7 +333,7 @@ void use_resources(int requested[3]) {
 
 void execute() {//while gera um numero entre 0 e total_procs se gerou "meu numero" faço o pedido, dorme por um segundo
     int count = 0;
-    while (count != 1) {
+    while (count != 2) {
         int random = (rand() % (n_procs));
         if (self == random) {
             int rand_idx = (rand() % (7));
@@ -378,15 +381,15 @@ int main(int argc, char **argv) {
     }
 
     //executa
-//    execute();
-    if (self == 0) {
-        use_resources(pv[0]);
-        usleep(100000);
-        use_resources(pv[0]);
-    } else {
-        use_resources(pv[2]);
-        use_resources(pv[3]);
-    }
+    execute();
+//    if (self == 0) {
+//        use_resources(pv[0]);
+//        usleep(100000);
+//        use_resources(pv[0]);
+//    } else {
+//        use_resources(pv[2]);
+//        use_resources(pv[3]);
+//    }
 
     send_finalize();
 //    MPI_Barrier(MPI_COMM_WORLD);
