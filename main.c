@@ -34,17 +34,13 @@ int *needed_resources;
 int *using_resources;
 int **queue;
 int self, parent, next, using_control_token, all_finalized, n_procs;
-pthread_mutex_t access_mutex;
 
 int has_all_res() {
-    pthread_mutex_lock(&access_mutex);
     for (int i = 0; i < n_rec; ++i) {
         if (needed_resources[i] && !my_resources[i]) {
-            pthread_mutex_unlock(&access_mutex);
             return 0;
         }
     }
-    pthread_mutex_unlock(&access_mutex);
     return 1;
 }
 
@@ -52,7 +48,6 @@ void init() {
     printf("Iniciando o nó %d PID: %d\n", self, getpid());
     all_finalized = 0;
     using_control_token = 0;
-    pthread_mutex_init(&access_mutex, NULL);
     my_resources = malloc(sizeof(int) * n_rec);
     needed_resources = malloc(sizeof(int) * n_rec);
     using_resources = malloc(sizeof(int) * n_rec);
@@ -121,7 +116,6 @@ void send_token() {
 }
 
 void receive_token_request(int origin) {
-    pthread_mutex_lock(&access_mutex);
     printf("%d: Recebi pedido de control Token", self);
     if (parent != -1) {
         printf(" encaminhando para meu parent %d\n", parent);
@@ -137,7 +131,6 @@ void receive_token_request(int origin) {
         } else
             printf("estou usando o token o entregarei quando terminar | next=%d parent=%d\n", next, parent);
     }
-    pthread_mutex_unlock(&access_mutex);
 }
 
 void receive_inquire(int tokens[3], int requester) {
@@ -323,7 +316,6 @@ void use_resources(int requested[3]) {
     //seção crítica
     usleep((__useconds_t) ((rand() % (4)) * 1000000));
     printf("%d: Saindo da seção crítica\n", self);
-    pthread_mutex_lock(&access_mutex);
     for (int m = 0; m < n_rec; ++m) {
         needed_resources[m] = 0;
         using_resources[m] = 0;
@@ -337,7 +329,6 @@ void use_resources(int requested[3]) {
     if (control_token && next != -1) {
         send_token();
     }
-    pthread_mutex_unlock(&access_mutex);
 }
 
 void execute() {//while gera um numero entre 0 e total_procs se gerou "meu numero" faço o pedido, dorme por um segundo
