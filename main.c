@@ -4,7 +4,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <pthread.h>
-#include <time.h>
 
 enum messages {
     REQUEST_CONTROL_TOKEN = 0,
@@ -38,10 +37,14 @@ int self, parent, next, using_control_token, all_finalized, n_procs;
 pthread_mutex_t access_mutex;
 
 int has_all_res() {
+    pthread_mutex_lock(&access_mutex);
     for (int i = 0; i < n_rec; ++i) {
-        if (needed_resources[i] && !my_resources[i])
+        if (needed_resources[i] && !my_resources[i]) {
+            pthread_mutex_unlock(&access_mutex);
             return 0;
+        }
     }
+    pthread_mutex_unlock(&access_mutex);
     return 1;
 }
 
@@ -49,7 +52,7 @@ void init() {
     printf("Iniciando o nó %d PID: %d\n", self, getpid());
     all_finalized = 0;
     using_control_token = 0;
-//    pthread_mutex_init(&access_mutex, NULL);
+    pthread_mutex_init(&access_mutex, NULL);
     my_resources = malloc(sizeof(int) * n_rec);
     needed_resources = malloc(sizeof(int) * n_rec);
     using_resources = malloc(sizeof(int) * n_rec);
@@ -98,6 +101,7 @@ void send_request_token(int origin, int parent) {
 void receive_ack(int tokens[3], int sender, int send_inq[n_procs][3]) {
     for (int i = 0; i < 3; ++i) {
         int value = tokens[i];
+        if (value ==-1) break;
         my_resources[value] = 1;
         using_resources[value] = 1;
         for (int j = 0; j < 3; ++j) {
@@ -110,11 +114,14 @@ void receive_ack(int tokens[3], int sender, int send_inq[n_procs][3]) {
 }
 
 void send_token() {
+    printf("%d: Enviando CONTROL_TOKEN para %d\n", self, next);
     MPI_Send(control_token, n_rec, MPI_INT, next, CONTROL_TOKEN_MESSAGE, MPI_COMM_WORLD);
+    next = -1;
     control_token = NULL;
 }
 
 void receive_token_request(int origin) {
+    pthread_mutex_lock(&access_mutex);
     printf("%d: Recebi pedido de control Token", self);
     if (parent != -1) {
         printf(" encaminhando para meu parent %d\n", parent);
@@ -130,6 +137,7 @@ void receive_token_request(int origin) {
         } else
             printf("estou usando o token o entregarei quando terminar | next=%d parent=%d\n", next, parent);
     }
+    pthread_mutex_unlock(&access_mutex);
 }
 
 void receive_inquire(int tokens[3], int requester) {
@@ -138,10 +146,10 @@ void receive_inquire(int tokens[3], int requester) {
     for (int i = 0; i < 3; ++i) {
         int value = tokens[i];
         if (value != -1) {
-            if (!using_resources[i]) {
+            if (!using_resources[value]) {
                 printf("%d: colocando %d no ack1\n", self, value);
                 response[count] = value; //coloca na resposta pro ack1 os tokens que não to usando
-                my_resources[i] = 0;
+                my_resources[value] = 0;
                 count++;
             } else {
                 printf("%d: colocando %d no Q para enviar depois\n", self, value);
@@ -220,7 +228,6 @@ void use_resources(int requested[3]) {
     }
     printf("\n");
     if (!has_all_res(requested)) { //se ele não possui todos os recursos
-        using_control_token = 1;
         if (!control_token) {
             printf("%d: Pedindo token para %d\n", self, parent);
             MPI_Send(&self, 1, MPI_INT, parent, REQUEST_CONTROL_TOKEN, MPI_COMM_WORLD);
@@ -230,6 +237,7 @@ void use_resources(int requested[3]) {
             MPI_Recv(control_token, n_rec, MPI_INT, MPI_ANY_SOURCE, CONTROL_TOKEN_MESSAGE, MPI_COMM_WORLD, &st);
             printf("%d: Recebi o control token de %d\n", self, st.MPI_SOURCE);
         }
+        using_control_token = 1;
         int send_inq[n_procs][3];
         for (int k = 0; k < n_procs; ++k) {
             for (int i = 0; i < 3; ++i) {
@@ -284,6 +292,7 @@ void use_resources(int requested[3]) {
                     printf("%d: recebi de %d os tokens", self, i);
                     for (int j = 0; j < 3; ++j) {
                         if (received[j] == -1) break;
+                        control_token[received[j]] = self;
                         printf(" %d", received[j]);
                     }
                     printf("\n");
@@ -293,7 +302,6 @@ void use_resources(int requested[3]) {
         }
         using_control_token = 0;
         if (control_token && next != -1) {
-            printf("%d: Enviando token para %d\n", self, next);
             send_token();
         }
         if (!has_all_res()) {
@@ -313,8 +321,9 @@ void use_resources(int requested[3]) {
     using_control_token = 0;
     printf("%d: Entrei seção crítica\n", self);
     //seção crítica
-    usleep((rand() % (2)) * 1000000);
-    printf("%d: Sai seção crítica\n", self);
+    usleep((__useconds_t) ((rand() % (4)) * 1000000));
+    printf("%d: Saindo da seção crítica\n", self);
+    pthread_mutex_lock(&access_mutex);
     for (int m = 0; m < n_rec; ++m) {
         needed_resources[m] = 0;
         using_resources[m] = 0;
@@ -326,9 +335,9 @@ void use_resources(int requested[3]) {
         }
     }
     if (control_token && next != -1) {
-        printf("%d: Enviando token para %d\n", self, next);
         send_token();
     }
+    pthread_mutex_unlock(&access_mutex);
 }
 
 void execute() {//while gera um numero entre 0 e total_procs se gerou "meu numero" faço o pedido, dorme por um segundo
@@ -360,9 +369,6 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &self);
     init();
 
-//    int i = 0;
-//    while(0==i)
-//        sleep(5);
 
     //thread pra controle de finalize
     err = pthread_create(&fin_thread, NULL, listen_fin, NULL);
@@ -382,25 +388,15 @@ int main(int argc, char **argv) {
 
     //executa
     execute();
-//    if (self == 0) {
-//        use_resources(pv[0]);
-//        usleep(100000);
-//        use_resources(pv[0]);
-//    } else {
-//        use_resources(pv[2]);
-//        use_resources(pv[3]);
-//    }
 
+    //finalize
     send_finalize();
-//    MPI_Barrier(MPI_COMM_WORLD);
-    //finaliza
 
     pthread_join(fin_thread, NULL);
     pthread_join(rec_thread, NULL);
     pthread_join(inq_thread, NULL);
+//
     printf("%d: TERMINEI\n", self);
-    MPI_Barrier(MPI_COMM_WORLD);
-    printf("%d: Passei barreira\n", self);
     MPI_Finalize();
     return 0;
 }
