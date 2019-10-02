@@ -70,7 +70,6 @@ void init() {
         }
         parent = -1;
     } else {
-//        pthread_mutex_lock(&access_mutex);
         parent = elected_node;
     }
     next = -1;
