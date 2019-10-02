@@ -1,5 +1,5 @@
-# mpi-naimi-trehel
-A MPI Implementation of Naimi-Trehel mutual exclusion algorithm
+# mpi-bouabdallah
+A MPI Implementation of Bouabdallah mutual exclusion algorithm
 
 ## How to build and run
 
